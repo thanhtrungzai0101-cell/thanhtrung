@@ -1,0 +1,63 @@
+import nltk
+import stanza
+import re
+import string  
+# Download required NLTK resources (run once)
+nltk.download('punkt')
+nltk.download('punkt_tab')
+nltk.download('stopwords')
+nltk.download('wordnet')
+nltk.download('omw-1.4')
+stanza.download('en')
+from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer, WordNetLemmatizer
+
+#Initialize Stanza pipeline
+nlp = stanza.Pipeline(lang='en', processors='tokenize,pos,lemma')
+stop_words = set(stopwords.words('english'))
+stemmer = PorterStemmer()
+lemmatizer = WordNetLemmatizer()
+text = ("hello i'm trung today i'm here talk about my life so my life so hard for bc everyday i being trying")
+print ("Original Text:\n", text)
+print("-"*60)
+#NLTK Sentence Segmentation
+sentences = sent_tokenize(text) #split text into sentences
+print("NLTK Sentence Segmentation:")
+for i, sentence in enumerate(sentences, 1):    #enumerate sentences with numbering
+    print(f"Sentence {i}: {sentence}")
+print("-"*60)
+
+#NLTK Word Tokenization
+nltk_words = word_tokenize(text) #split text into words
+print("NLTK Word Tokenization:")
+print(nltk_words)
+print("-"*60)
+#nltk normalization
+#Lowercasing all words
+lowercased_words = [word.lower() for word in nltk_words] #convert words to lowercase
+print("Lowercased Words:")
+print(lowercased_words)
+print("-"*60)
+#Removing punctuation
+punctuation_removed_words = [word for word in lowercased_words if word not in string.punctuation] #remove punctuation from words
+print("punctuation Removed Words:")
+print(punctuation_removed_words)
+print("-"*60)
+
+#reconstruct normalized text
+normalized_text = ' '.join(punctuation_removed_words) #join tokens back into a single string
+print("normalized Text:\n", normalized_text)
+print("-"*60)
+
+#Stanza pos tagging
+doc = nlp(normalized_text) #run stanza pipeline on normalized text
+print("Stanza POS Tagging:")
+for sentence in doc.sentences:  #iterate through sentences
+    for word in sentence.words:   #iterate through words
+        print(f"Word: {word.text}\tPOS: {word.upos}")  #print word + pos tag
+print("-"*60)
+#stanza dependecy parsing
+print("Stanza Dependency Parsing:")
+for sentence in doc.sentences: for word in sentence.words:
+     #print word, its syntactic head, and the relation
