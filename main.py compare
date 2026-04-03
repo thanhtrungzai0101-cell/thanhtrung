@@ -1,0 +1,110 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+
+import nltk
+import string
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout, Bidirectional
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+# ===================== LOAD =====================
+file_path = r"C:\projectfinal\hate speech.csv"
+df = pd.read_csv(file_path)
+
+print(df.head())
+
+# 🔥 FIX ĐÚNG CỘT
+df = df[['tweet', 'class']]
+df.columns = ['text', 'label']
+
+# ===================== CLEAN =====================
+df = df.dropna()
+df['label'] = df['label'].astype(int)
+
+print("\n📊 Label distribution:")
+print(df['label'].value_counts())
+
+# ===================== PREPROCESS =====================
+df['text'] = df['text'].astype(str).str.lower()
+df['text'] = df['text'].apply(
+    lambda x: x.translate(str.maketrans('', '', string.punctuation))
+)
+
+stop_words = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
+
+df['text'] = df['text'].apply(
+    lambda x: " ".join(
+        [lemmatizer.lemmatize(w) for w in x.split() if w not in stop_words]
+    )
+)
+
+# ===================== SPLIT =====================
+X_train, X_val, y_train, y_val = train_test_split(
+    df['text'], df['label'], test_size=0.2, random_state=42
+)
+
+# ===================== LSTM =====================
+y_train_oh = pd.get_dummies(y_train).astype("float32")
+y_val_oh = pd.get_dummies(y_val).astype("float32")
+y_val_oh = y_val_oh.reindex(columns=y_train_oh.columns, fill_value=0)
+
+tokenizer = Tokenizer(num_words=10000)
+tokenizer.fit_on_texts(X_train)
+
+X_train_pad = pad_sequences(tokenizer.texts_to_sequences(X_train), maxlen=100)
+X_val_pad = pad_sequences(tokenizer.texts_to_sequences(X_val), maxlen=100)
+
+model = Sequential([
+    Embedding(10000, 32, input_length=100),
+    Bidirectional(LSTM(16)),
+    Dropout(0.3),
+    Dense(y_train_oh.shape[1], activation='softmax')
+])
+
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+print("\n🚀 Training LSTM...")
+model.fit(X_train_pad, y_train_oh,
+          validation_data=(X_val_pad, y_val_oh),
+          epochs=3, batch_size=32)
+
+lstm_acc = model.evaluate(X_val_pad, y_val_oh)[1]
+
+# ===================== LOGISTIC =====================
+tfidf = TfidfVectorizer(max_features=5000)
+
+X_train_tfidf = tfidf.fit_transform(X_train)
+X_val_tfidf = tfidf.transform(X_val)
+
+lr = LogisticRegression(max_iter=200)
+lr.fit(X_train_tfidf, y_train)
+
+y_pred = lr.predict(X_val_tfidf)
+lr_acc = accuracy_score(y_val, y_pred)
+
+print("\n📊 Logistic Regression Report:")
+print(classification_report(y_val, y_pred))
+
+# ===================== RESULT =====================
+print("\n===== MODEL COMPARISON =====")
+print(f"LSTM Accuracy: {lstm_acc:.4f}")
+print(f"Logistic Accuracy: {lr_acc:.4f}")
+
+plt.bar(['LSTM', 'Logistic'], [lstm_acc, lr_acc])
+plt.title("Model Comparison")
+plt.show()
