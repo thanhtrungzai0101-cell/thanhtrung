@@ -1,110 +1,146 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import os
-
+import seaborn as sb
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
 
 import nltk
 import string
+import warnings
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+from wordcloud import WordCloud
 
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout, Bidirectional
+import tensorflow as tf
+from tensorflow import keras
+from keras import layers
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 nltk.download('stopwords')
+nltk.download('omw-1.4')
 nltk.download('wordnet')
+warnings.filterwarnings('ignore')
 
-# ===================== LOAD =====================
-file_path = r"C:\projectfinal\hate speech.csv"
-df = pd.read_csv(file_path)
+# Load the dataset
+data = pd.read_csv('Dataset---Hate-Speech-Detection-using-Deep-Learning.csv')
+# Display the first few rows of the dataset
+print(data.head())
+# Print the shape of the data frame
+print(data.shape)
+# Check the info about their columns
+print(data.info())
 
-print(df.head())
-
-# 🔥 FIX ĐÚNG CỘT
-df = df[['tweet', 'class']]
-df.columns = ['text', 'label']
-
-# ===================== CLEAN =====================
-df = df.dropna()
-df['label'] = df['label'].astype(int)
-
-print("\n📊 Label distribution:")
-print(df['label'].value_counts())
-
-# ===================== PREPROCESS =====================
-df['text'] = df['text'].astype(str).str.lower()
-df['text'] = df['text'].apply(
-    lambda x: x.translate(str.maketrans('', '', string.punctuation))
+# Plot class distribution
+plt.pie(
+ data['class'].value_counts().values,  # counts of each class
+ labels=data['class'].value_counts().index, # class names
+ autopct='%1.1f%%',  # show percentages
+ startangle=90 # rotate for better look
 )
+plt.title("Class Distribution")
+plt.show()
 
-stop_words = set(stopwords.words('english'))
-lemmatizer = WordNetLemmatizer()
+# Balancing the Dataset, using a combination of upsampling and downsampling
+class_0 = data[data['class'] == 0] # Hate Speech
+class_1 = data[data['class'] == 1].sample(n=3500, random_state=42) # Offensive Language
+class_2 = data[data['class'] == 2] # Neutral
 
-df['text'] = df['text'].apply(
-    lambda x: " ".join(
-        [lemmatizer.lemmatize(w) for w in x.split() if w not in stop_words]
-    )
-)
+balanced_df = pd.concat([class_0, class_0, class_0, class_1, class_2], axis=0)
 
-# ===================== SPLIT =====================
-X_train, X_val, y_train, y_val = train_test_split(
-    df['text'], df['label'], test_size=0.2, random_state=42
-)
+# Visualize the balanced distribution
+plt.pie(balanced_df['class'].value_counts().values,
+ labels=balanced_df['class'].value_counts().index,
+ autopct='%1.1f%%')
+plt.title("Balanced Class Distribution")
+plt.show()
+# Text Preprocessing
+data['tweet'] = data['tweet'].str.lower()
 
-# ===================== LSTM =====================
-y_train_oh = pd.get_dummies(y_train).astype("float32")
-y_val_oh = pd.get_dummies(y_val).astype("float32")
-y_val_oh = y_val_oh.reindex(columns=y_train_oh.columns, fill_value=0)
+punctuations_list = string.punctuation
+def remove_punctuations(text):
+ temp = str.maketrans('', '', punctuations_list)
+ return text.translate(temp)
 
-tokenizer = Tokenizer(num_words=10000)
+data['tweet']= data['tweet'].apply(lambda x: remove_punctuations(x))
+data.head()
+
+def preprocess_text(text):
+ stop_words = set(stopwords.words('english'))
+ lemmatizer = WordNetLemmatizer()
+ words = [lemmatizer.lemmatize(word) for word in text.split() if word not in stop_words]
+ return " ".join(words)
+
+balanced_df['tweet'] = balanced_df['tweet'].apply(preprocess_text)
+balanced_df.head()
+# Word Cloud Visualization
+def plot_word_cloud(data, typ):
+ corpus = " ".join(data['tweet'])
+ wc = WordCloud(max_words=100, width=800, height=400, collocations=False).generate(corpus)
+ plt.figure(figsize=(10, 5))
+ plt.imshow(wc, interpolation='bilinear')
+ plt.axis('off')
+ plt.title(f"Word Cloud for {typ} Class", fontsize=15)
+ plt.show()
+
+plot_word_cloud(balanced_df[balanced_df['class'] == 2], typ="Neutral")
+plot_word_cloud(balanced_df[balanced_df['class'] == 1], typ="Offensive")
+plot_word_cloud(balanced_df[balanced_df['class'] == 0], typ="Hate Speech")
+# Tokenization and Padding
+features = balanced_df['tweet']
+target = balanced_df['class']
+X_train, X_val, Y_train, Y_val = train_test_split(features, target, test_size=0.2, random_state=42)
+
+# One-hot encode the labels
+Y_train = pd.get_dummies(Y_train)
+Y_val = pd.get_dummies(Y_val)
+
+# Tokenization
+max_words = 5000
+max_len = 100
+tokenizer = Tokenizer(num_words=max_words, lower=True, split=' ')
 tokenizer.fit_on_texts(X_train)
 
-X_train_pad = pad_sequences(tokenizer.texts_to_sequences(X_train), maxlen=100)
-X_val_pad = pad_sequences(tokenizer.texts_to_sequences(X_val), maxlen=100)
+# Convert text to sequences
+X_train_seq = tokenizer.texts_to_sequences(X_train)
+X_val_seq = tokenizer.texts_to_sequences(X_val)
 
-model = Sequential([
-    Embedding(10000, 32, input_length=100),
-    Bidirectional(LSTM(16)),
-    Dropout(0.3),
-    Dense(y_train_oh.shape[1], activation='softmax')
+# Pad sequences
+X_train_padded = pad_sequences(X_train_seq, maxlen=max_len, padding='post', truncating='post')
+X_val_padded = pad_sequences(X_val_seq, maxlen=max_len, padding='post', truncating='post')
+# Build the LSTM Model
+max_words = 10000
+max_len = 100 
+
+model = keras.models.Sequential([
+ layers.Embedding(input_dim=max_words, output_dim=32, input_length=max_len),
+ layers.Bidirectional(layers.LSTM(16)),
+ layers.Dense(512, activation='relu', kernel_regularizer='l1'),
+ layers.BatchNormalization(),
+ layers.Dropout(0.3),
+ layers.Dense(3, activation='softmax')
 ])
 
-model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+model.build(input_shape=(None, max_len))
 
-print("\n🚀 Training LSTM...")
-model.fit(X_train_pad, y_train_oh,
-          validation_data=(X_val_pad, y_val_oh),
-          epochs=3, batch_size=32)
+model.compile(loss='categorical_crossentropy',
+ optimizer='adam',
+ metrics=['accuracy'])
 
-lstm_acc = model.evaluate(X_val_pad, y_val_oh)[1]
+model.summary()
+# Train the Model
+es = EarlyStopping(patience=3, monitor='val_accuracy', restore_best_weights=True)
+lr = ReduceLROnPlateau(patience=2, monitor='val_loss', factor=0.5, verbose=0)
+history = model.fit(X_train_padded, Y_train,
+ validation_data=(X_val_padded, Y_val),
+ epochs=50,
+ batch_size=32,
+ callbacks=[es, lr])
+# Evaluate the Model
+history_df = pd.DataFrame(history.history)
 
-# ===================== LOGISTIC =====================
-tfidf = TfidfVectorizer(max_features=5000)
+history_df[['loss', 'val_loss']].plot(title="Loss")
 
-X_train_tfidf = tfidf.fit_transform(X_train)
-X_val_tfidf = tfidf.transform(X_val)
-
-lr = LogisticRegression(max_iter=200)
-lr.fit(X_train_tfidf, y_train)
-
-y_pred = lr.predict(X_val_tfidf)
-lr_acc = accuracy_score(y_val, y_pred)
-
-print("\n📊 Logistic Regression Report:")
-print(classification_report(y_val, y_pred))
-
-# ===================== RESULT =====================
-print("\n===== MODEL COMPARISON =====")
-print(f"LSTM Accuracy: {lstm_acc:.4f}")
-print(f"Logistic Accuracy: {lr_acc:.4f}")
-
-plt.bar(['LSTM', 'Logistic'], [lstm_acc, lr_acc])
-plt.title("Model Comparison")
+history_df[['accuracy', 'val_accuracy']].plot(title="Accuracy")
 plt.show()
